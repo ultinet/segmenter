@@ -559,9 +559,11 @@ int main(int argc, char **argv)
             if (packet.stream_index == video_index) {
                 video_frame_time = (double)packet.pts * video_st->codec->time_base.num / video_st->codec->time_base.den;
                 packet.pts = packet.pts * video_st->codec->time_base.num * video_st->time_base.den / video_st->codec->time_base.den * video_st->time_base.num;
+                packet.dts = packet.dts * video_st->codec->time_base.num * video_st->time_base.den / video_st->codec->time_base.den * video_st->time_base.num;
             } else if (packet.stream_index == audio_index) {
                 audio_frame_time = (double)packet.pts * audio_st->codec->time_base.num / audio_st->codec->time_base.den;
                 packet.pts = packet.pts * audio_st->codec->time_base.num * audio_st->time_base.den / audio_st->codec->time_base.den * audio_st->time_base.num;
+                packet.dts = packet.dts * audio_st->codec->time_base.num * audio_st->time_base.den / audio_st->codec->time_base.den * audio_st->time_base.num;
             }
 
             av_log(NULL, AV_LOG_INFO, "video frame time=%f, audio frame time=%f\n", video_frame_time, audio_frame_time);
