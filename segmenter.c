@@ -39,6 +39,84 @@
 #define PKT_FLAG_KEY AV_PKT_FLAG_KEY
 #endif /* HAVE_AV_PKT_FLAG_KEY */
 
+static void *xmalloc(size_t sz)
+{
+    void *retval = malloc(sz);
+    if (!retval) {
+        av_log(NULL, AV_LOG_ERROR, "Could not allocate %zd bytes\n", sz);
+        exit(1);
+    }
+    return retval;
+}
+
+static void *xcalloc(size_t nmemb, size_t sz)
+{
+    void *retval = calloc(nmemb, sz);
+    if (!retval) {
+        av_log(NULL, AV_LOG_ERROR, "Could not allocate %zd bytes\n", sz);
+        exit(1);
+    }
+    return retval;
+}
+
+static char *xstrdup(const char *str)
+{
+    char *retval = strdup(str);
+    if (!retval) {
+        av_log(NULL, AV_LOG_ERROR, "Could not allocate %zd bytes\n", strlen(str));
+        exit(1);
+    }
+    return retval;
+}
+
+static void *xrealloc(void *ptr, size_t sz)
+{
+    void *retval = realloc(ptr, sz);
+    if (!retval) {
+        av_log(NULL, AV_LOG_ERROR, "Could not allocate %zd bytes\n", ptr);
+        exit(1);
+    }
+    return retval;
+}
+
+typedef struct CharPtrArray {
+    const char **elems;
+    size_t nelems;
+    size_t alloc;
+} CharPtrArray;
+
+static void char_ptr_array_ensure_capacity(CharPtrArray *arr, size_t nelems)
+{
+    size_t alloc;
+    if (arr->alloc >= nelems)
+        return;
+    alloc = arr->alloc;
+    while (alloc < nelems) {
+        size_t new_alloc = alloc ? alloc + (alloc >> 1): 2;
+        if (new_alloc < alloc || new_alloc & (~((size_t)-1 / (8 * sizeof(char *)))) != 0) {
+            av_log(NULL, AV_LOG_ERROR, "Could not allocate space for %zd elements\n", new_alloc);
+            exit(1);
+        }
+        alloc = new_alloc;
+    }
+    arr->elems = xrealloc(arr->elems, sizeof(char *) * alloc);
+    arr->alloc = alloc;
+}
+
+static void char_ptr_array_append(CharPtrArray *arr, char *p)
+{
+    char_ptr_array_ensure_capacity(arr, arr->nelems + 1);
+    arr->elems[arr->nelems] = p;
+    arr->nelems++;
+}
+
+static void char_ptr_array_free(CharPtrArray *arr)
+{
+    if (arr->elems)
+        free(arr->elems);
+    arr->elems = NULL;
+}
+
 #ifndef HAVE_BASENAME
 static char *basename(char *path)
 {
@@ -81,11 +159,7 @@ static AVStream *add_output_stream(AVFormatContext *output_format_context, AVStr
     output_codec_context->bit_rate = input_codec_context->bit_rate;
 
     if (input_codec_context->extradata) {
-        output_codec_context->extradata = malloc(input_codec_context->extradata_size);
-        if (!output_codec_context->extradata_size) {
-            av_log(output_format_context, AV_LOG_ERROR, "Could not allocate memory for extradata\n");
-            return NULL;
-        }
+        output_codec_context->extradata = xmalloc(input_codec_context->extradata_size);
         memmove(output_codec_context->extradata, input_codec_context->extradata, input_codec_context->extradata_size);
         output_codec_context->extradata_size = input_codec_context->extradata_size;
     }
@@ -190,11 +264,7 @@ static int index_file_writer_init(IndexFileWriter *writer, const char *index_fil
         size_t dot_index;
         size_t index_file_sz = strlen(index_file);
 
-        tmp_file = malloc(index_file_sz + 2);
-        if (!tmp_file) {
-            av_log(NULL, AV_LOG_ERROR, "Could not allocate space for temporary index filename\n");
-            return 1;
-        }
+        tmp_file = xmalloc(index_file_sz + 2);
         dot = strrchr(index_file, '/');
         dot = dot ? dot + 1: index_file;
         dot_index = dot - index_file;
@@ -219,11 +289,7 @@ static int index_file_writer_init(IndexFileWriter *writer, const char *index_fil
 static int index_file_writer_populate_current_ts_file(IndexFileWriter *writer)
 {
     if (!writer->current_ts_file) {
-        char *buf = calloc(writer->output_prefix_sz + 32, sizeof(char));
-        if (!buf) {
-            av_log(NULL, AV_LOG_ERROR, "Could not allocate space for ts filename\n");
-            return 1;
-        }
+        char *buf = xcalloc(writer->output_prefix_sz + 32, sizeof(char));
         writer->current_ts_file = buf;
     }
     snprintf(writer->current_ts_file, writer->output_prefix_sz + 32, "%s-%u.%s", writer->output_prefix, writer->sequence_num, writer->output_ext);
@@ -278,8 +344,10 @@ int main(int argc, char **argv)
     const char *http_prefix;
     long max_tsfiles = 0;
     char *max_tsfiles_check;
+    CharPtrArray bs_filter_names = { 0, 0, 0 };
     AVInputFormat *input_format = NULL;
     AVOutputFormat *output_format = NULL;
+    AVBitStreamFilterContext **bs_filters = NULL;
     AVFormatContext *ic = NULL;
     AVFormatContext *oc = NULL;
     AVStream *video_st = NULL;
@@ -294,7 +362,7 @@ int main(int argc, char **argv)
 
     {
         int optch;
-        while ((optch = getopt(argc, argv, "e:f:p:")) != -1) {
+        while ((optch = getopt(argc, argv, "e:f:p:x:")) != -1) {
             switch (optch) {
             case 'e':
                 /* format */
@@ -308,7 +376,11 @@ int main(int argc, char **argv)
                 /* prefix */
                 if (output_prefix)
                     free(output_prefix);
-                output_prefix = strdup(optarg);
+                output_prefix = xstrdup(optarg);
+                break;
+            case 'x':
+                /* filter */
+                char_ptr_array_append(&bs_filter_names, (char *)optarg);
                 break;
             }
         }
@@ -317,7 +389,7 @@ int main(int argc, char **argv)
     argv += optind;
 
     if (argc < 4 || argc > 5) {
-        av_log(NULL, AV_LOG_ERROR, "Usage: %s [-e input_format] [-f output_format] [-p output_prefix] <input MPEG-TS / MP3 file> <segment duration in seconds> <output m3u8 index file> <http prefix> [<segment window size>]\n", progname);
+        av_log(NULL, AV_LOG_ERROR, "Usage: %s [-e input_format] [-f output_format] [-p output_prefix] [-x filter] <input MPEG-TS / MP3 file> <segment duration in seconds> <output m3u8 index file> <http prefix> [<segment window size>]\n", progname);
         if (output_prefix)
             free(output_prefix);
         return 1;
@@ -338,12 +410,12 @@ int main(int argc, char **argv)
         const char *p = strchr(input_basename, '.');
         if (!p) {
             if (!output_prefix)
-                output_prefix = strdup(input_basename);
+                output_prefix = xstrdup(input_basename);
         } else {
             input_ext = p + 1;
             if (!output_prefix) {
                 size_t len = p - input_basename;
-                output_prefix = malloc(len + 1);
+                output_prefix = xmalloc(len + 1);
                 memmove(output_prefix, input_basename, len);
                 output_prefix[len] = '\0';
             }
@@ -476,6 +548,28 @@ int main(int argc, char **argv)
         }
     }
 
+    bs_filters = xcalloc(oc->nb_streams, sizeof(*bs_filters));
+
+    for (i = 0; i < oc->nb_streams; i++) {
+        const char **p = bs_filter_names.elems;
+        const char **e = bs_filter_names.elems + bs_filter_names.nelems;
+        AVBitStreamFilterContext *bs_filter = NULL;
+        for (; p < e; p++) {
+            AVBitStreamFilterContext *new_bs_filter = av_bitstream_filter_init(*p);
+            if (!new_bs_filter) {
+                av_log(NULL, AV_LOG_ERROR, "Unknown bitstream filter: %s\n", *p);
+                err = 1;
+                goto out;
+            }
+            if (bs_filter)
+                bs_filter->next = new_bs_filter;
+            bs_filter = new_bs_filter;
+            p++;
+        }
+        bs_filters[i] = bs_filter;
+    }
+
+
 #if 0
     if (av_set_parameters(oc, NULL) < 0) {
         av_log(NULL, AV_LOG_ERROR, "Invalid output format parameters\n");
@@ -549,6 +643,7 @@ int main(int argc, char **argv)
         AVPacket packet;
 
         for (;;) {
+            AVStream *st;
             ret = av_read_frame(ic, &packet);
             if (ret == AVERROR(EAGAIN))
                 continue;
@@ -570,13 +665,13 @@ int main(int argc, char **argv)
 
             if (packet.stream_index == video_index) {
                 video_frame_time = (double)packet.pts * video_st->codec->time_base.num / video_st->codec->time_base.den;
-                packet.pts = packet.pts * video_st->codec->time_base.num * video_st->time_base.den / video_st->codec->time_base.den * video_st->time_base.num;
-                packet.dts = packet.dts * video_st->codec->time_base.num * video_st->time_base.den / video_st->codec->time_base.den * video_st->time_base.num;
-            } else if (packet.stream_index == audio_index) {
+                st = video_st;
+            } else {
                 audio_frame_time = (double)packet.pts * audio_st->codec->time_base.num / audio_st->codec->time_base.den;
-                packet.pts = packet.pts * audio_st->codec->time_base.num * audio_st->time_base.den / audio_st->codec->time_base.den * audio_st->time_base.num;
-                packet.dts = packet.dts * audio_st->codec->time_base.num * audio_st->time_base.den / audio_st->codec->time_base.den * audio_st->time_base.num;
+                st = audio_st;
             }
+            packet.pts = packet.pts * st->codec->time_base.num * st->time_base.den / st->codec->time_base.den * st->time_base.num;
+            packet.dts = packet.dts * st->codec->time_base.num * st->time_base.den / st->codec->time_base.den * st->time_base.num;
 
             av_log(NULL, AV_LOG_INFO, "video frame time=%f, audio frame time=%f\n", video_frame_time, audio_frame_time);
             if (video_st) {
@@ -588,6 +683,27 @@ int main(int argc, char **argv)
             } else {
                 assert(audio_st != NULL);
                 frame_time = audio_frame_time;
+            }
+
+            {
+                AVBitStreamFilterContext *bsfc = bs_filters[st->index];
+                for (; bsfc; bsfc = bsfc->next) {
+                    AVPacket filtered = packet;
+                    ret = av_bitstream_filter_filter(bsfc, st->codec, NULL,
+                            &filtered.data, &filtered.size,
+                            packet.data, packet.size,
+                            packet.flags & AV_PKT_FLAG_KEY);
+                    if (ret < 0) {
+                        av_log(NULL, AV_LOG_ERROR, "Failed to apply bitstream filters\n");
+                        err = 1;
+                        goto out;
+                    }
+                    if (ret > 0) {
+                        av_free_packet(&packet);
+                        filtered.destruct = av_destruct_packet;
+                        packet = filtered;
+                    }
+                }
             }
 
             if ((packet.flags & PKT_FLAG_KEY) && frame_time - last_frame_time >= segment_duration) {
@@ -660,7 +776,16 @@ out:
 #endif
 
     if (oc) {
-        for(i = 0; i < oc->nb_streams; i++) {
+        for (i = 0; i < oc->nb_streams; i++) {
+            AVBitStreamFilterContext *bsfc = bs_filters[i];
+            while (bsfc) {
+                AVBitStreamFilterContext *next = bsfc->next;
+                av_bitstream_filter_close(bsfc);
+                bsfc = next;
+            }
+        }
+
+        for (i = 0; i < oc->nb_streams; i++) {
             av_freep(&oc->streams[i]->codec);
             av_freep(&oc->streams[i]);
         }
@@ -675,7 +800,12 @@ out:
         av_free(oc);
     }
 
+    if (bs_filters)
+        free(bs_filters);
+
     index_file_writer_free(&writer);
+
+    char_ptr_array_free(&bs_filter_names);
 
     return 0;
 }
