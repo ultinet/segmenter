@@ -298,6 +298,8 @@ int main(int argc, char **argv)
                 break;
             case 'p':
                 /* prefix */
+                if (output_prefix)
+                    free(output_prefix);
                 output_prefix = strdup(optarg);
                 break;
             }
@@ -308,7 +310,8 @@ int main(int argc, char **argv)
 
     if (argc < 4 || argc > 5) {
         av_log(NULL, AV_LOG_ERROR, "Usage: %s [-e input_format] [-f output_format] [-p output_prefix] <input MPEG-TS / MP3 file> <segment duration in seconds> <output m3u8 index file> <http prefix> [<segment window size>]\n", progname);
-        free(output_prefix);
+        if (output_prefix)
+            free(output_prefix);
         return 1;
     }
 
