@@ -326,14 +326,15 @@ int main(int argc, char **argv)
             goto out;
         }
     } else {
-        if (!output_prefix) {
-            const char *input_basename = basename((char *)input);
-            const char *p = strchr(input_basename, '.');
-            if (!p) {
+        const char *input_basename = basename((char *)input);
+        const char *p = strchr(input_basename, '.');
+        if (!p) {
+            if (!output_prefix)
                 output_prefix = strdup(input_basename);
-            } else {
+        } else {
+            input_ext = p + 1;
+            if (!output_prefix) {
                 size_t len = p - input_basename;
-                input_ext = p + 1;
                 output_prefix = malloc(len + 1);
                 memmove(output_prefix, input_basename, len);
                 output_prefix[len] = '\0';
@@ -425,7 +426,7 @@ int main(int argc, char **argv)
                 sep = end;
             assert(sep - p > 0);
             /* Use the same extension as the input file if possible */
-            if (strncmp(p, input_ext, sep - p) == 0 || p == extensions) {
+            if (input_ext && (strncmp(p, input_ext, sep - p) == 0 || p == extensions)) {
                 strncpy(output_ext, p, sep - p);
                 output_ext[sep - p] = '\0';
             }
