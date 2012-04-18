@@ -164,7 +164,7 @@ static AVStream *add_output_stream(AVFormatContext *output_format_context, AVStr
         output_codec_context->extradata_size = input_codec_context->extradata_size;
     }
 
-    if(av_q2d(input_codec_context->time_base) * input_codec_context->ticks_per_frame > av_q2d(input_stream->time_base) && av_q2d(input_stream->time_base) < 1.0/1000) {
+    if (!(output_format_context->flags & AVFMT_VARIABLE_FPS) && av_q2d(input_codec_context->time_base) * input_codec_context->ticks_per_frame > av_q2d(input_stream->time_base) && av_q2d(input_stream->time_base) < 1.0 / 1000) {
         output_codec_context->time_base = input_codec_context->time_base;
         output_codec_context->time_base.num *= input_codec_context->ticks_per_frame;
     }
