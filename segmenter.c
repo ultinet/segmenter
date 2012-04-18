@@ -645,7 +645,11 @@ out:
         avcodec_close(audio_st->codec);
 
     if (ic)
+#ifdef HAVE_AVFORMAT_CLOSE_INPUT
+        avformat_close_input(&ic);
+#else
         av_close_input_file(ic);
+#endif
 
     if (oc) {
         for(i = 0; i < oc->nb_streams; i++) {

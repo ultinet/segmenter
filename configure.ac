@@ -48,7 +48,7 @@ AC_CHECK_DECL([AV_PKT_FLAG_KEY], [
 #include <libavcodec/avcodec.h>
 ])
 AC_CHECK_FUNCS([av_strerror avio_open avio_close avio_flush])
-AC_CHECK_FUNCS([avformat_new_stream avformat_open_input avformat_find_stream_info avformat_write_header])
+AC_CHECK_FUNCS([avformat_new_stream avformat_open_input avformat_find_stream_info avformat_write_header avformat_close_input])
 AC_CHECK_FUNCS([avcodec_open2])
 
 CFLAGS=$ac_save_CFLAGS
